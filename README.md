@@ -94,7 +94,8 @@ $$
 \tilde{X} = (\hat{A})^{K} X, \quad \hat{A} = D^{-1/2}(A+I)D^{-1/2}.
 $$
 
-You compute \(\tilde{X}\) **once**, then train a plain **MLP** on \(\tilde{X}\). This isolates the value of structural smoothing **without** using edges during training.
+You compute $\tilde{X}$ once, then train a plain **MLP** on $\tilde{X}$.  
+This isolates the value of structural smoothing **without** using edges during training.
 
 ---
 
