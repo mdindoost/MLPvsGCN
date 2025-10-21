@@ -177,15 +177,32 @@ class MLP(nn.Module):
 # Load data & show samples
 # ----------------------------
 print("(gnn_env) md724@ml:~/graph-demo$ python cora_demo_stepwise_v2.py")
+
 dataset = Planetoid(root='/tmp/Cora', name='Cora')
 data = dataset[0].to(device)
 
-print("A few sample rows of data ....")
+print("\n=== Dataset: Cora ===")
+print("Cora is a citation network with:")
+print(" - 2,708 papers (nodes)")
+print(" - 5,429 citation links (edges, undirected)")
+print(" - 1,433 binary word indicators as node features")
+print(" - 7 research topic classes (e.g., Neural_Networks, Rule_Learning)")
+print("Each node’s feature vector represents the presence/absence of certain words in the paper’s abstract, bag-of-words (BoW).")
+print("======================\n")
+
+print("A few sample rows of data (first 3 nodes, 12 feature dims):")
 print_feature_samples(data.x, data.y, k=3, cols=12, prefix="Raw Cora rows")
+
 t_count, v_count, te_count = count_masks(data)
-print(f"\nSplit sizes (public split) -> train: {t_count}, val: {v_count}, test: {te_count}")
+print(f"\nSplit sizes (public split) → train: {t_count}, val: {v_count}, test: {te_count}")
 print("Note: tiny train set vs model capacity → easy to hit train=1.000; generalization is what matters.\n")
 
+print("\n\nIf you want a more programmatic summary (As in notebooks):")
+print(data)
+print(f"Feature matrix shape: {data.x.shape}")
+print(f"Edge index shape: {data.edge_index.shape}")
+print(f"Number of classes: {dataset.num_classes}")
+print(f"Feature dimension: {dataset.num_node_features}")
 # ----------------------------
 # Step 1: GCN
 # ----------------------------
@@ -208,6 +225,22 @@ with torch.no_grad():
     print("GCN:", neighbor_agreement(gcn_pred, data.edge_index))
 
 print(f"\n(Also reminding) Split sizes -> train: {t_count}, val: {v_count}, test: {te_count}")
+
+
+print("""
+Note:\n
+The Graph Convolutional Network (GCN) we trained earlier has two layers:
+    h1 = ReLU(Â X W1)
+    out = Â h1 W2
+where Â = D^{-1/2} (A + I) D^{-1/2} mixes each node with its neighbors.
+
+That means every hidden representation h1[i] depends on the node's own features
+and its neighbors' features.
+
+We'll now build an MLP with the *same* depth and width (two linear layers, same hidden dim),
+but it will NOT use Â or A at all.
+Each node will be processed independently — as if the graph structure didn’t exist.
+""")
 
 # ----------------------------
 # Step 2: MLP (raw)
