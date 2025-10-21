@@ -90,7 +90,9 @@ If `matplotlib` is installed, you’ll also see a tiny bar chart summarizing tes
 
 **Simple Graph Convolution (SGC)** removes nonlinearities and collapses message passing into a single preprocessing step:
 
-\[ \tilde{X} = (\hat{A})^{K} X, \quad \hat{A} = D^{-1/2}(A+I)D^{-1/2}. \]
+$$
+\tilde{X} = (\hat{A})^{K} X, \quad \hat{A} = D^{-1/2}(A+I)D^{-1/2}.
+$$
 
 You compute \(\tilde{X}\) **once**, then train a plain **MLP** on \(\tilde{X}\). This isolates the value of structural smoothing **without** using edges during training.
 
