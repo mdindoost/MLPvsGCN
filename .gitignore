@@ -1,16 +1,44 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 *.so
 *.egg-info/
-.venv/
+*.egg
+
+# Virtual environments
 venv/
-env/
+gnn_env/
+.env/
+.venv/
+
+# Build / dist / logs
 build/
 dist/
-.ipynb_checkpoints/
-.DS_Store
-/tmp/
+*.log
+*.out
+*.err
+
+# Data and datasets
+data/
+*/data/
 tmp/
-.cache/
+tmp*/
+*.npy
+*.npz
+*.pt
+*.pth
+
+# Torch Geometric cached datasets
+Cora/
+*/Cora/
+tmp*
+/tmp/
+
+# IDE / Jupyter
+.ipynb_checkpoints/
+.vscode/
+.idea/
+*.swp
+.DS_Store
