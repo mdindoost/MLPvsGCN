@@ -76,9 +76,9 @@ If `matplotlib` is installed, you’ll also see a tiny bar chart summarizing tes
 
 ## What are Laplacian Positional Encodings (LPE)?
 
-- Build the (normalized) **graph Laplacian** \(L = I - D^{-1/2} A D^{-1/2}\).
-- Solve the **eigenproblem** \(L v_i = \lambda_i v_i\).
-- Take the first \(k\) eigenvectors (smallest eigenvalues). Stack them to get an \(N \times k\) matrix — **k coordinates per node**.
+- Build the (normalized) **graph Laplacian** $L = I - D^{-1/2} A D^{-1/2}$.
+- Solve the **eigenproblem** $L v_i = \lambda_i v_i$.
+- Take the first $k$ eigenvectors (smallest eigenvalues). Stack them to get an $N \times k$ matrix — **k coordinates per node**.
 - These provide a **low-frequency, smooth basis** that *spans* the large-scale structure of the graph.
 - Concatenating them to the node features gives an MLP a **positional prior** in “graph space.”
 
