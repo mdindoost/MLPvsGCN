@@ -41,7 +41,6 @@ python -m pip install -r requirements.txt
 
 # Run the demo
 python cora_demo_stepwise_v2.py
-
 ```
 
 > **Note:** PyTorch Geometric may pull additional tiny wheels at first import; the single `torch-geometric` meta-package works well for Planetoid/Cora demos.
@@ -119,12 +118,32 @@ Numbers vary with seeds and package versions; the **ordering** is robust: **GCN 
 
 ---
 
-## Cite
+## How to cite
 
-If you extend this for research/teaching, please consider citing:
+If you use this repo in teaching or research, please cite:
 
-- Kipf & Welling (2017). *Semi-Supervised Classification with Graph Convolutional Networks.*
-- Wu et al. (2019). *Simplifying Graph Convolutional Networks (SGC).*
+> **Mohammad Dindoost.** *MLPvsGCN — A Lecture-Ready Demo on Why Edges Matter.* GitHub repository, 2025.  
+> https://github.com/mdindoost/MLPvsGCN
+
+**BibTeX**
+```bibtex
+@software{Dindoost2025MLPvsGCN,
+  author  = {Mohammad Dindoost},
+  title   = {MLPvsGCN — A Lecture-Ready Demo on Why Edges Matter},
+  year    = {2025},
+  url     = {https://github.com/mdindoost/MLPvsGCN},
+  note    = {Version 1.0}
+}
+```
+
+## Support, issues, and discussion
+
+- Open an issue: https://github.com/mdindoost/MLPvsGCN/issues  
+- Email: md724@njit.edu
+
+## Contributing and forking
+
+Forks and PRs are welcome. Please open an issue first for major changes so we can discuss the design.
 
 ---
 
