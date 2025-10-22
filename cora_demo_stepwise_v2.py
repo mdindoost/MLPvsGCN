@@ -257,6 +257,81 @@ print("- Perfect train, poor test → overfitting and lack of relational signal.
 
 mlp_H = mlp_raw.hidden(data.x)
 print_embedding_samples(mlp_H, data.y, k=3, cols=8, prefix="MLP(hidden) on raw features")
+# ----------------------------
+# Triplet cosine-sim demo (GCN vs MLP) — deterministic, 3 examples
+# ----------------------------
+def _unique_undirected_edges(edge_index):
+    row, col = edge_index
+    s = set()
+    for u, v in zip(row.tolist(), col.tolist()):
+        if u == v:
+            continue
+        a, b = (u, v) if u < v else (v, u)
+        s.add((a, b))
+    return sorted(list(s))
+
+def _adjacency_sets(edge_index, num_nodes):
+    row, col = edge_index
+    adj = [set() for _ in range(num_nodes)]
+    S = set()
+    for u, v in zip(row.tolist(), col.tolist()):
+        if u == v:
+            continue
+        adj[u].add(v); adj[v].add(u)
+        S.add((u, v)); S.add((v, u))
+    return adj, S
+
+def _first_non_neighbor(u, adj, N):
+    # deterministic scan
+    for w in range(N):
+        if w != u and (w not in adj[u]):
+            return w
+    return (u + 1) % N  # fallback (dense graphs)
+
+@torch.no_grad()
+def _cosine(a, b, eps=1e-9):
+    an = a / (a.norm() + eps)
+    bn = b / (b.norm() + eps)
+    return float((an * bn).sum())
+
+@torch.no_grad()
+def show_three_triplets_compare_gcn_mlp(H_gcn, H_mlp, edge_index, y):
+    N = H_gcn.size(0)
+    edges = _unique_undirected_edges(edge_index)
+    adj, _ = _adjacency_sets(edge_index, N)
+    print("\nTriplet similarity (3 deterministic examples):")
+    print("For each anchor i, compare neighbor j vs non-neighbor k in hidden space.")
+    count = 0
+    for (u, v) in edges:
+        i, j = u, v
+        k = _first_non_neighbor(i, adj, N)
+        cos_gcn_ij = _cosine(H_gcn[i], H_gcn[j])
+        cos_gcn_ik = _cosine(H_gcn[i], H_gcn[k])
+        cos_mlp_ij = _cosine(H_mlp[i], H_mlp[j])
+        cos_mlp_ik = _cosine(H_mlp[i], H_mlp[k])
+        print(f"  anchor i={i} (y={{int(y[i])}}) | neighbor j={j} (y={{int(y[j])}}) | non-neighbor k={k} (y={{int(y[k])}})")
+        print(f"    GCN: cos(i,j)={cos_gcn_ij:.3f}  vs  cos(i,k)={cos_gcn_ik:.3f}")
+        print(f"    MLP: cos(i,j)={cos_mlp_ij:.3f}  vs  cos(i,k)={cos_mlp_ik:.3f}")
+        count += 1
+        if count == 3:
+            break
+    # Aggregate mean cosine on first 100 edges
+    import numpy as _np
+    sims_gcn_e, sims_gcn_ne, sims_mlp_e, sims_mlp_ne = [], [], [], []
+    for (u, v) in edges[:100]:
+        k = _first_non_neighbor(u, adj, N)
+        sims_gcn_e.append(_cosine(H_gcn[u], H_gcn[v]))
+        sims_gcn_ne.append(_cosine(H_gcn[u], H_gcn[k]))
+        sims_mlp_e.append(_cosine(H_mlp[u], H_mlp[v]))
+        sims_mlp_ne.append(_cosine(H_mlp[u], H_mlp[k]))
+    if sims_gcn_e:
+        print("Aggregate mean cosine (first 100 edges):")
+        print(f"    GCN: edges={_np.mean(sims_gcn_e):.3f} | non-edges={_np.mean(sims_gcn_ne):.3f}")
+        print(f"    MLP: edges={_np.mean(sims_mlp_e):.3f} | non-edges={_np.mean(sims_mlp_ne):.3f}")
+
+# Run comparison now that we have both hidden reps
+show_three_triplets_compare_gcn_mlp(gcn_H, mlp_H, data.edge_index, data.y)
+
 
 with torch.no_grad():
     print("\nNeighbor agreement (MLP raw):", neighbor_agreement(mlp_pred, data.edge_index))
