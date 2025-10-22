@@ -523,6 +523,10 @@ if HAS_MPL:
         plt.xticks(range(len(labels)), labels, rotation=40, ha='right', fontsize=8)
         plt.ylabel("Test Acc")
         plt.title("Injecting structure into an MLP")
-        plt.ylim(0, 1.0); plt.tight_layout(); plt.show()
+        plt.ylim(0, 1.0); plt.tight_layout(); plt.savefig('accuracy_summary.png', dpi=200)
+        print('Saved summary bar chart to accuracy_summary.png')
+        # plt.savefig("accuracy_summary.png", dpi=200)
+        # plt.show()  # commented out for headless environments
+        
     except Exception:
         pass
