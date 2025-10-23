@@ -214,6 +214,22 @@ print(f"GCN        -> train {gcn_train:.3f} | val {gcn_val:.3f} | test {gcn_test
 
 print("\nDescribe:")
 print("- Downstream task: node classification.")
+print("- The downstream task defines the embedding’s meaning.")
+print("""
+      The task changes what "good" means
+
+If your downstream task is:
+
+- Node classification: You want embeddings that separate nodes with different labels.
+
+- Link prediction: You want embeddings that bring connected (or similar) nodes closer in vector space.
+
+- Graph classification: You want graph-level embeddings that reflect global structure, not individual nodes.
+
+- Clustering or retrieval: You want smooth embeddings that reflect latent similarity, regardless of labels.
+
+Each of these tasks defines a different geometry in the embedding space — different gradients, different learning pressures.\n
+      """)
 print("- GCN mixes a node’s features with its neighbors (message passing).")
 print("- Hidden activations h = ReLU(Â X W1). Values like 0.999 are post-ReLU activations, not probabilities.")
 
@@ -300,7 +316,7 @@ def show_three_triplets_compare_gcn_mlp(H_gcn, H_mlp, edge_index, y):
     edges = _unique_undirected_edges(edge_index)
     adj, _ = _adjacency_sets(edge_index, N)
     print("\nTriplet similarity (3 deterministic examples):")
-    print("For each anchor i, compare neighbor j vs non-neighbor k in hidden space.")
+    print("For each anchor i, compare neighbor j vs non-neighbor k in hidden space.\n\n")
     count = 0
     for (u, v) in edges:
         i, j = u, v
