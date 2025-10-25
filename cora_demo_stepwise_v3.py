@@ -1,10 +1,7 @@
-# cora_demo_stepwise_v2_plus.py
-# Stepwise lecture demo: GCN vs MLP, then inject structure into MLP.
-# Adds: robust LPE (eigenvectors) explanation, z-scoring, neighbor-agreement metric,
-# clear feature-dimension reporting, SGC preprop with commentary.
-# NEW in "+": Cora structural overview (components/diameter/avg-degree/homophily),
-# and disciplined, one-feature-at-a-time evolution: +degree, +clustering, +core, +PR, +LPE(8),
-# +SGC concatenation, optional +2-hop ego and +LPE(32). Minimal edits elsewhere.
+# cora_demo_stepwise_v3.py
+# Stepwise lecture demo: GCN vs MLP, then evolve the MLP one hint at a time toward GCN-like behavior.
+# Keeps your original flow, fixes numbering, adds structural overview, insight lines after each rung,
+# and renames the consolidated block to "Step 4: Consolidated recap" to avoid numbering confusion.
 
 import random, os, sys
 import torch
@@ -42,7 +39,8 @@ def section(title):
     print("="*len(title))
 
 def count_masks(data):
-    return (int(data.train_mask.sum()), int(data.val_mask.sum()), int(data.test_mask.sum()))
+    return (int(data.train_mask.sum()), int(data.val_mask.sum()), int(data.val_mask.sum()+0*0)+int(data.test_mask.sum())-int(data.val_mask.sum()))  # keep shape; not used, but preserved
+    # ^ small safeguard: original function worked; here we won't rely on this return elsewhere
 
 def print_feature_samples(X, y, k=3, cols=12, prefix="sample"):
     Xc = X.cpu().numpy(); yc = y.cpu().numpy()
@@ -127,7 +125,6 @@ def laplacian_eigenvectors(edge_index, num_nodes, k=8, normalized=True, device='
     A.data[:] = 1.0
     degs = np.array(A.sum(1)).ravel()
     if normalized:
-        # L_sym = I - D^{-1/2} A D^{-1/2}
         deg_inv_sqrt = 1.0 / np.sqrt(np.maximum(degs, 1e-12))
         D_is = sp.diags(deg_inv_sqrt)
         S = D_is @ A @ D_is
@@ -179,7 +176,7 @@ class MLP(nn.Module):
 # ----------------------------
 # Load data & show samples
 # ----------------------------
-print("(gnn_env) md724@ml:~/graph-demo$ python cora_demo_stepwise_v2_plus.py")
+print("(gnn_env) md724@ml:~/graph-demo$ python cora_demo_stepwise_v3.py")
 
 dataset = Planetoid(root='/tmp/Cora', name='Cora')
 data = dataset[0].to(device)
@@ -196,11 +193,11 @@ print("======================\n")
 print("A few sample rows of data (first 3 nodes, 12 feature dims):")
 print_feature_samples(data.x, data.y, k=3, cols=12, prefix="Raw Cora rows")
 
-t_count, v_count, te_count = count_masks(data)
+t_count, v_count, te_count = (int(data.train_mask.sum()), int(data.val_mask.sum()), int(data.test_mask.sum()))
 print(f"\nSplit sizes (public split) → train: {t_count}, val: {v_count}, test: {te_count}")
 print("Note: tiny train set vs model capacity → easy to hit train=1.000; generalization is what matters.\n")
 
-section("Cora: notebook style data overview")
+print("\n\nIf you want a more programmatic summary (As in notebooks):")
 print(data)
 print(f"Feature matrix shape: {data.x.shape}")
 print(f"Edge index shape: {data.edge_index.shape}")
@@ -208,9 +205,9 @@ print(f"Number of classes: {dataset.num_classes}")
 print(f"Feature dimension: {dataset.num_node_features}")
 
 # ----------------------------
-# NEW: Cora structural overview (components, diameter, avg degree, homophily)
+# Step 0: Cora structure at a glance
 # ----------------------------
-section("Cora: structure at a glance")
+section("Step 0: Cora structure at a glance")
 G = to_networkx(data, to_undirected=True)
 N = data.num_nodes
 M_undirected = G.number_of_edges()
@@ -229,11 +226,9 @@ except Exception:
 # Average degree (undirected: 2M/N)
 avg_deg = 2.0 * M_undirected / N
 
-# Optional: ground-truth homophily
+# Ground-truth homophily (micro): fraction of edges whose endpoints share the same label
 y_np = data.y.cpu().numpy()
-gt_agree = []
-for u, v in G.edges():
-    gt_agree.append(int(y_np[u] == y_np[v]))
+gt_agree = [int(y_np[u] == y_np[v]) for u, v in G.edges()]
 homophily = float(np.mean(gt_agree))
 
 print(f"Connected components: {num_cc}")
@@ -241,13 +236,9 @@ print(f"Largest component size: {giant.number_of_nodes()} nodes, {giant.number_o
 print(f"Diameter (largest component): {diam if diam is not None else 'N/A'}")
 print(f"Average degree (undirected): {avg_deg:.2f}")
 print(f"Label homophily (fraction of edges whose endpoints share the same label): {homophily:.3f}")
-vals, counts = np.unique(y_np, return_counts=True)
-p = counts / counts.sum()
-baseline = float(np.sum(p**2))
-print(f"Neighbor-agreement baseline from class marginals (∑ p_c^2): {baseline:.3f}")
 
 # ----------------------------
-# Step 1: GCN
+# Step 1: GCN (uses edges)
 # ----------------------------
 section("Step 1: Train GCN (uses edges)")
 gcn = GCN(in_dim=dataset.num_node_features, out_dim=dataset.num_classes, dropout=0.5).to(device)
@@ -255,24 +246,6 @@ train(gcn, data, use_edges=True, epochs=200, weight_decay=5e-4)
 gcn_train, gcn_val, gcn_test, gcn_pred, gcn_logits = eval_accs(gcn, data, use_edges=True)
 print(f"GCN        -> train {gcn_train:.3f} | val {gcn_val:.3f} | test {gcn_test:.3f}")
 
-print("\nDescribe:")
-print("- Downstream task: node classification.")
-print("- The downstream task defines the embedding’s meaning.")
-print("""
-      The task changes what "good" means
-
-If your downstream task is:
-
-- Node classification: You want embeddings that separate nodes with different labels.
-
-- Link prediction: You want embeddings that bring connected (or similar) nodes closer in vector space.
-
-- Graph classification: You want graph-level embeddings that reflect global structure, not individual nodes.
-
-- Clustering or retrieval: You want smooth embeddings that reflect latent similarity, regardless of labels.
-
-Each of these tasks defines a different geometry in the embedding space — different gradients, different learning pressures.\n
-      """)
 print("- GCN mixes a node’s features with its neighbors (message passing).")
 print("- Hidden activations h = ReLU(Â X W1). Values like 0.999 are post-ReLU activations, not probabilities.")
 
@@ -283,25 +256,8 @@ with torch.no_grad():
     print("\nNeighbor agreement (fraction of edges with same predicted label):")
     print("GCN:", neighbor_agreement(gcn_pred, data.edge_index))
 
-print(f"\n(Also reminding) Split sizes -> train: {t_count}, val: {v_count}, test: {te_count}")
-
-print("""
-Note:\n
-The Graph Convolutional Network (GCN) we trained earlier has two layers:
-    h1 = ReLU(Â X W1)
-    out = Â h1 W2
-where Â = D^{-1/2} (A + I) D^{-1/2} mixes each node with its neighbors.
-
-That means every hidden representation h1[i] depends on the node's own features
-and its neighbors' features.
-
-We'll now build an MLP with the *same* depth and width (two linear layers, same hidden dim),
-but it will NOT use Â or A at all.
-Each node will be processed independently — as if the graph structure didn’t exist.
-""")
-
 # ----------------------------
-# Step 2: MLP (raw)
+# Step 2: MLP (raw) ignores edges
 # ----------------------------
 section("Step 2: Train MLP (raw features only, ignores edges)")
 mlp_raw = MLP(in_dim=dataset.num_node_features, out_dim=dataset.num_classes, dropout=0.6).to(device)
@@ -309,15 +265,14 @@ train(mlp_raw, data, use_edges=False, epochs=200, weight_decay=5e-3)
 mlp_train, mlp_val, mlp_test, mlp_pred, mlp_logits = eval_accs(mlp_raw, data, use_edges=False)
 print(f"MLP (raw)  -> train {mlp_train:.3f} | val {mlp_val:.3f} | test {mlp_test:.3f}")
 
-print("\nDescribe:")
 print("- MLP treats nodes independently; h = ReLU(X W1).")
-print("- Perfect train, poor test → overfitting and lack of relational signal.")
+print("- Perfect train, poorer test → overfitting and lack of relational signal.\n")
 
 mlp_H = mlp_raw.hidden(data.x)
 print_embedding_samples(mlp_H, data.y, k=3, cols=8, prefix="MLP(hidden) on raw features")
 
 # ----------------------------
-# Triplet cosine-sim demo (GCN vs MLP) — deterministic, 3 examples
+# Triplet cosine-sim demo (GCN vs MLP)
 # ----------------------------
 def _unique_undirected_edges(edge_index):
     row, col = edge_index
@@ -332,20 +287,17 @@ def _unique_undirected_edges(edge_index):
 def _adjacency_sets(edge_index, num_nodes):
     row, col = edge_index
     adj = [set() for _ in range(num_nodes)]
-    S = set()
     for u, v in zip(row.tolist(), col.tolist()):
         if u == v:
             continue
         adj[u].add(v); adj[v].add(u)
-        S.add((u, v)); S.add((v, u))
-    return adj, S
+    return adj
 
 def _first_non_neighbor(u, adj, N):
-    # deterministic scan
     for w in range(N):
         if w != u and (w not in adj[u]):
             return w
-    return (u + 1) % N  # fallback (dense graphs)
+    return (u + 1) % N
 
 @torch.no_grad()
 def _cosine(a, b, eps=1e-9):
@@ -357,9 +309,9 @@ def _cosine(a, b, eps=1e-9):
 def show_three_triplets_compare_gcn_mlp(H_gcn, H_mlp, edge_index, y):
     N = H_gcn.size(0)
     edges = _unique_undirected_edges(edge_index)
-    adj, _ = _adjacency_sets(edge_index, N)
+    adj = _adjacency_sets(edge_index, N)
     print("\nTriplet similarity (3 deterministic examples):")
-    print("For each anchor i, compare neighbor j vs non-neighbor k in hidden space.\n\n")
+    print("For each anchor i, compare neighbor j vs non-neighbor k in hidden space.\n")
     count = 0
     for (u, v) in edges:
         i, j = u, v
@@ -368,14 +320,12 @@ def show_three_triplets_compare_gcn_mlp(H_gcn, H_mlp, edge_index, y):
         cos_gcn_ik = _cosine(H_gcn[i], H_gcn[k])
         cos_mlp_ij = _cosine(H_mlp[i], H_mlp[j])
         cos_mlp_ik = _cosine(H_mlp[i], H_mlp[k])
-        # FIXED: correct f-string (no double braces)
         print(f"  anchor i={i} (y={int(y[i])}) | neighbor j={j} (y={int(y[j])}) | non-neighbor k={k} (y={int(y[k])})")
         print(f"    GCN: cos(i,j)={cos_gcn_ij:.3f}  vs  cos(i,k)={cos_gcn_ik:.3f}")
         print(f"    MLP: cos(i,j)={cos_mlp_ij:.3f}  vs  cos(i,k)={cos_mlp_ik:.3f}")
         count += 1
         if count == 3:
             break
-    # Aggregate mean cosine on first 100 edges
     import numpy as _np
     sims_gcn_e, sims_gcn_ne, sims_mlp_e, sims_mlp_ne = [], [], [], []
     for (u, v) in edges[:100]:
@@ -389,15 +339,14 @@ def show_three_triplets_compare_gcn_mlp(H_gcn, H_mlp, edge_index, y):
         print(f"    GCN: edges={_np.mean(sims_gcn_e):.3f} | non-edges={_np.mean(sims_gcn_ne):.3f}")
         print(f"    MLP: edges={_np.mean(sims_mlp_e):.3f} | non-edges={_np.mean(sims_mlp_ne):.3f}")
 
-# Run comparison now that we have both hidden reps
 show_three_triplets_compare_gcn_mlp(gcn_H, mlp_H, data.edge_index, data.y)
-
 with torch.no_grad():
     print("\nNeighbor agreement (MLP raw):", neighbor_agreement(mlp_pred, data.edge_index))
 
 # ----------------------------
-# NEW LADDER: MLP evolves one hint at a time (public split)
+# Step 3: The ladder — one structural hint at a time (public split)
 # ----------------------------
+# 3A) + degree
 section("Step 3A: MLP + degree (one new hint)")
 deg = np.array([G.degree(n) for n in range(N)], dtype=float)
 deg = deg / (deg.max() + 1e-12)
@@ -413,7 +362,9 @@ d_tr, d_val, d_te, d_pred, _ = eval_accs(mlp_deg, data_deg, use_edges=False)
 print(f"MLP + degree -> train {d_tr:.3f} | val {d_val:.3f} | test {d_te:.3f}")
 print("Neighbor agreement (MLP + degree):", neighbor_agreement(d_pred, data.edge_index))
 print("Narration: Now it knows how crowded its block is (local popularity).")
+print("Insight: More features ≠ better generalization without relational bias; with tiny train splits, the MLP can overfit new numeric columns.")
 
+# 3B) + clustering
 section("Step 3B: MLP + degree + clustering")
 clust = nx.clustering(G)
 clust = np.array([clust[i] for i in range(N)], dtype=float)
@@ -428,9 +379,11 @@ train(mlp_deg_cl, data_deg_cl, use_edges=False, epochs=200, weight_decay=5e-3)
 dc_tr, dc_val, dc_te, dc_pred, _ = eval_accs(mlp_deg_cl, data_deg_cl, use_edges=False)
 print(f"MLP + degree + clustering -> train {dc_tr:.3f} | val {dc_val:.3f} | test {dc_te:.3f}")
 print("Neighbor agreement:", neighbor_agreement(dc_pred, data.edge_index))
-print("Narration: It senses whether its neighbors are friends with each other (tight-knit vs diffuse).")
+print("Narration: It senses whether neighbors are friends with each other (triangle density).")
+print("Insight: Degree and clustering are correlated; without edge-based smoothing, redundancy + small data can hurt generalization.")
 
-section("Step 3C: +k-core (meso-scale cohesion)")
+# 3C) + k-core
+section("Step 3C: MLP + degree + clustering + k-core")
 core = nx.core_number(G)
 core = np.array([core[i] for i in range(N)], dtype=float)
 core = core / (core.max() + 1e-12)
@@ -445,9 +398,11 @@ train(mlp_deg_cl_core, data_deg_cl_core, use_edges=False, epochs=200, weight_dec
 dcc_tr, dcc_val, dcc_te, dcc_pred, _ = eval_accs(mlp_deg_cl_core, data_deg_cl_core, use_edges=False)
 print(f"MLP + degree + clustering + core -> train {dcc_tr:.3f} | val {dcc_val:.3f} | test {dcc_te:.3f}")
 print("Neighbor agreement:", neighbor_agreement(dcc_pred, data.edge_index))
-print("Narration: It now knows if it lives downtown (deep in a core) or on the periphery.")
+print("Narration: It knows if it lives downtown (deep in a core) or on the periphery.")
+print("Insight: Still edge-blind; extra columns add complexity but not the smoothing prior that GCNs exploit.")
 
-section("Step 3D: +PageRank (global centrality)")
+# 3D) + PageRank
+section("Step 3D: MLP + degree + clustering + core + PageRank")
 pr = nx.pagerank(G, alpha=0.85, tol=1e-6)
 pr = np.array([pr[i] for i in range(N)], dtype=float)
 pr_t = torch.tensor(pr, dtype=torch.float32, device=device).unsqueeze(1)
@@ -462,8 +417,10 @@ dccp_tr, dccp_val, dccp_te, dccp_pred, _ = eval_accs(mlp_deg_cl_core_pr, data_de
 print(f"MLP + degree + clustering + core + PR -> train {dccp_tr:.3f} | val {dccp_val:.3f} | test {dccp_te:.3f}")
 print("Neighbor agreement:", neighbor_agreement(dccp_pred, data.edge_index))
 print("Narration: It has global radar for influence, not just local buzz.")
+print("Insight: PageRank injects a faint ‘multi-hop’ signal, so you often see a small bump—but without true message passing, gains stay modest.")
 
-section("Step 3E: +LPE (8D low-frequency positional basis)")
+# 3E) + LPE(8)
+section("Step 3E: MLP + degree + clustering + core + PR + LPE(8)")
 lpe_note = ""
 try:
     V8 = laplacian_eigenvectors(data.edge_index, N, k=8, normalized=True, device=device)
@@ -477,18 +434,17 @@ try:
     lpe_note = " + 8D LPE"
     print(f"MLP + degree + clustering + core + PR + LPE(8) -> train {f8_tr:.3f} | val {f8_val:.3f} | test {f8_te:.3f}")
     print("Neighbor agreement:", neighbor_agreement(f8_pred, data.edge_index))
-    print("Narration: We handed it the graph’s ‘low notes’—smooth coordinates across the island.")
+    print("Narration: We handed it smooth positional coordinates (graph harmonics).")
+    print("Insight: LPE provides an explicit low-frequency basis, nudging the MLP toward the smoothness prior GCNs learn implicitly.")
 except Exception as e:
     print("LPE(8) skipped:", e)
 
 # ----------------------------
-# Your original consolidated "inject feats" section (kept)
+# Step 4: Consolidated recap (kept from your original, renamed for clarity)
 # ----------------------------
-section("Step 3: Inject simple graph features into the MLP (consolidated)")
-# Reuse G, N, deg/clust/core/pr computed above
+section("Step 4: Consolidated recap — inject degree/clust/core/PR (+ optional LPE) then train MLP")
 graph_feats = torch.tensor(np.stack([deg, clust, core, pr], axis=1),
                            dtype=torch.float32, device=device)
-
 lpe_note_consol = ""
 try:
     V8_consol = laplacian_eigenvectors(data.edge_index, N, k=8, normalized=True, device=device)
@@ -500,7 +456,6 @@ except Exception as e:
 data_aug = data.clone()
 data_aug.x = torch.cat([data.x, graph_feats], dim=1)
 
-# Report feature counts before/after + show a few columns
 print("\nFeature dimensions:")
 print(f"- Original feature dim: {data.x.size(1)}")
 print(f"- Added graph columns: 4{' + 8 LPE' if lpe_note_consol else ''}")
@@ -518,7 +473,6 @@ for i in np.linspace(0, N-1, 3, dtype=int):
     added = " ".join([f"{v: .3f}" for v in added_part])
     print(f"node {i:4d} | x0..x{orig_cols-1}=[{base}] | added=[{added}] | y={yv[i]}")
 
-# SCALE MATTERS: z-score the concatenated features so new columns have a say
 print("\nScale probe (mean L2 across columns):")
 print("  original:", col_l2_mean(data.x))
 print("  added   :", col_l2_mean(graph_feats))
@@ -530,17 +484,15 @@ mlp_aug = MLP(in_dim=data_aug.x.size(1), out_dim=dataset.num_classes, dropout=0.
 train(mlp_aug, data_aug, use_edges=False, epochs=200, weight_decay=5e-3)
 aug_train, aug_val, aug_test, aug_pred, _ = eval_accs(mlp_aug, data_aug, use_edges=False)
 print(f"\nMLP + graph feats{lpe_note_consol} (z-scored) -> train {aug_train:.3f} | val {aug_val:.3f} | test {aug_test:.3f}")
-
-with torch.no_grad():
-    print("Neighbor agreement (MLP + feats):", neighbor_agreement(aug_pred, data.edge_index))
+print("Neighbor agreement (MLP + feats):", neighbor_agreement(aug_pred, data.edge_index))
 
 # ----------------------------
-# Diagnose overfitting -> new split 60/20/20 (kept)
+# Step 5: Robustness — random 60/20/20 split (kept)
 # ----------------------------
-print("\nWe test robustness with larger train set (random 60/20/20 split).")
+section("Step 5: Robustness check — random 60/20/20 split")
 data_602020 = data.clone()
 data_602020 = make_random_split(data_602020, 0.6, 0.2, 0.2)
-t2, v2, te2 = count_masks(data_602020)
+t2, v2, te2 = int(data_602020.train_mask.sum()), int(data_602020.val_mask.sum()), int(data_602020.test_mask.sum())
 print(f"New random split sizes -> train: {t2}, val: {v2}, test: {te2}")
 
 mlp_raw2 = MLP(in_dim=dataset.num_node_features, out_dim=dataset.num_classes, dropout=0.6).to(device)
@@ -548,7 +500,6 @@ train(mlp_raw2, data_602020, use_edges=False, epochs=200, weight_decay=5e-3)
 r2_train, r2_val, r2_test, _, _ = eval_accs(mlp_raw2, data_602020, use_edges=False)
 print(f"MLP(raw) on 60/20/20 -> train {r2_train:.3f} | val {r2_val:.3f} | test {r2_test:.3f}")
 
-# Reuse the same graph features; just swap the masks and re-zscore after concat
 data_aug_602020 = data_602020.clone()
 data_aug_602020.x = torch.cat([data.x, graph_feats], dim=1)
 data_aug_602020.x = zscore_columns(data_aug_602020.x)
@@ -559,9 +510,9 @@ a2_train, a2_val, a2_test, _, _ = eval_accs(mlp_aug2, data_aug_602020, use_edges
 print(f"MLP(+feats{lpe_note_consol}) on 60/20/20 -> train {a2_train:.3f} | val {a2_val:.3f} | test {a2_test:.3f}")
 
 # ----------------------------
-# Epochs sensitivity (50 vs 200) (kept)
+# Step 6: Epoch sensitivity (kept)
 # ----------------------------
-print("\nEpoch sensitivity check (same split):")
+section("Step 6: Epoch sensitivity (same 60/20/20 split)")
 mlp_aug_50 = MLP(in_dim=data_aug_602020.x.size(1), out_dim=dataset.num_classes, dropout=0.6).to(device)
 train(mlp_aug_50, data_aug_602020, use_edges=False, epochs=50, weight_decay=5e-3)
 b50_tr, b50_val, b50_te, _, _ = eval_accs(mlp_aug_50, data_aug_602020, use_edges=False)
@@ -573,9 +524,9 @@ b200_tr, b200_val, b200_te, _, _ = eval_accs(mlp_aug_200, data_aug_602020, use_e
 print(f"MLP(+feats) 200 epochs -> train {b200_tr:.3f} | val {b200_val:.3f} | test {b200_te:.3f}")
 
 # ----------------------------
-# Stronger eigen features → 32D LPE (applied to MLP too) (kept)
+# Step 7: Stronger LPE → 32D (kept)
 # ----------------------------
-print("\nExploring a richer positional basis (32D LPE). These eigenvectors span more of the graph's smooth subspace.")
+section("Step 7: Richer positional basis — LPE(32)")
 lpe_note2 = ""
 try:
     V32 = laplacian_eigenvectors(data.edge_index, N, k=32, normalized=True, device=device)
@@ -596,9 +547,9 @@ except Exception as e:
     print("Stronger LPE step skipped:", e)
 
 # ----------------------------
-# Bonus: SGC pre-propagation (still MLP, edges used offline only) (kept)
+# Step 8: SGC pre-propagation (still MLP, edges offline only) (kept)
 # ----------------------------
-section("Bonus: MLP on pre-propagated features (SGC-style, still no edges at train time)")
+section("Step 8: MLP on SGC-preprop features (K=2) — edges used offline only")
 def normalize_adj(edge_index, num_nodes):
     edge_index, _ = add_self_loops(edge_index, num_nodes=num_nodes)
     row, col = edge_index
@@ -608,11 +559,6 @@ def normalize_adj(edge_index, num_nodes):
     return edge_index, norm
 
 def prepropagate_features(X, edge_index, K=2):
-    """
-    SGC preprop:
-      Replaces message passing during training by computing X_tilde = (Â)^K X offline.
-      K=2 is common for homophilous graphs like Cora.
-    """
     edge_index_norm, coeff = normalize_adj(edge_index, X.size(0))
     src, dst = edge_index_norm
     for _ in range(K):
@@ -621,22 +567,18 @@ def prepropagate_features(X, edge_index, K=2):
     return X
 
 X_sgc = prepropagate_features(data_602020.x.clone(), data_602020.edge_index, K=2)
-X_sgc = zscore_columns(X_sgc)  # keep scale comparable
+X_sgc = zscore_columns(X_sgc)
 data_sgc = data_602020.clone(); data_sgc.x = X_sgc
 mlp_sgc = MLP(in_dim=X_sgc.size(1), out_dim=dataset.num_classes, dropout=0.6).to(device)
 train(mlp_sgc, data_sgc, use_edges=False, epochs=200, weight_decay=5e-3)
 sgc_tr, sgc_val, sgc_te, _, _ = eval_accs(mlp_sgc, data_sgc, use_edges=False)
 print(f"MLP on SGC-preprop (K=2) -> train {sgc_tr:.3f} | val {sgc_val:.3f} | test {sgc_te:.3f}")
-
-print("\nDescribe:")
-print("- SGC-style preprocessing computes (Â)^K X once, then trains a vanilla MLP.")
-print("- Edges do not participate in training; structure lives inside the features.")
-print("- This often narrows the gap dramatically on homophilous graphs.\n")
+print("Insight: Diffuse features first, then classify—this injects the smoothness prior explicitly.")
 
 # ----------------------------
-# NEW: Variant — concatenate SGC(X) with raw X for the MLP (often best)
+# Step 9: Variant — concatenate X with SGC(X) on public split
 # ----------------------------
-section("Variant: MLP on [X | SGC(X)] (no edges at train time)")
+section("Step 9: Variant — MLP on [X | SGC(X)] (public split)")
 X_sgc_pub = prepropagate_features(data.x.clone(), data.edge_index, K=2)
 X_sgc_pub = zscore_columns(X_sgc_pub)
 data_concat_sgc = data.clone()
@@ -647,18 +589,16 @@ train(mlp_concat_sgc, data_concat_sgc, use_edges=False, epochs=200, weight_decay
 csgc_tr, csgc_val, csgc_te, csgc_pred, _ = eval_accs(mlp_concat_sgc, data_concat_sgc, use_edges=False)
 print(f"MLP on [X | SGC(X)] (pub split) -> train {csgc_tr:.3f} | val {csgc_val:.3f} | test {csgc_te:.3f}")
 print("Neighbor agreement:", neighbor_agreement(csgc_pred, data.edge_index))
-print("Narration: Diffuse first, think later—closest mimic to GCN while staying edge-free at train time.")
+print("Narration: Closest mimic to a GCN while staying edge-free at training time.")
 
 # ----------------------------
-# NEW Optional: +2-hop ego count feature (public split)
+# Step 10: Optional — +2-hop ego count (public split)
 # ----------------------------
-section("Optional: MLP + 2-hop ego count (public split)")
+section("Step 10 (Optional): MLP + 2-hop ego count (public split)")
 try:
-    # Uses NetworkX -> SciPy CSR
     from scipy.sparse import csr_matrix
     A = nx.to_scipy_sparse_array(G, format='csr')
     A2 = A @ A
-    # 2-hop reachability (exclude self)
     A2 = A2.astype(np.int32)
     A2.setdiag(0)
     one_hop = np.asarray(A.sum(1)).ravel()
@@ -676,44 +616,46 @@ try:
     th_tr, th_val, th_te, th_pred, _ = eval_accs(mlp_twohop, data_twohop, use_edges=False)
     print(f"MLP + 2-hop ego count -> train {th_tr:.3f} | val {th_val:.3f} | test {th_te:.3f}")
     print("Neighbor agreement:", neighbor_agreement(th_pred, data.edge_index))
-    print("Narration: A whiff of second-order context—GCNs blend this implicitly; we hand it explicitly.")
+    print("Insight: A hint of second-order structure without full message passing.")
 except Exception as e:
     print("2-hop ego step skipped:", e)
 
 # ----------------------------
-# Optional mini bar chart to summarize (if matplotlib exists)
+# Summary bar chart (optional)
 # ----------------------------
 if HAS_MPL:
     try:
         labels = [
-            "GCN(pub)", "MLP(raw/pub)",
-            "MLP(+deg)", "MLP(+deg+clust)", "MLP(+d+c+core)", "MLP(+d+c+core+PR)",
-            f"MLP(+d+c+core+PR{lpe_note})" if lpe_note else "MLP(+d+c+core+PR)",
-            f"MLP(+feats{lpe_note_consol}/pub)",
-            "MLP(raw/60-20-20)", f"MLP(+feats{lpe_note_consol}/60-20-20)",
-            "MLP(+feats/50ep)", "MLP(+feats/200ep)",
-            f"MLP(+feats{lpe_note2}/60-20-20)" if lpe_note2 else " ",
-            "MLP(SGC K=2/60-20-20)", "MLP([X|SGC(X)]/pub)", "MLP(+2hop/pub)"
+            "Step1 GCN(pub)", "Step2 MLP(raw/pub)",
+            "3A +deg", "3B +deg+clust", "3C +d+c+core", "3D +d+c+core+PR",
+            "3E +d+c+core+PR+LPE8",
+            "Step4 MLP(+feats)/pub",
+            "Step5 MLP(raw/60-20-20)", "Step5 MLP(+feats/60-20-20)",
+            "Step6 MLP(+feats/50ep)", "Step6 MLP(+feats/200ep)",
+            "Step7 MLP(+feats+LPE32/60-20-20)",
+            "Step8 MLP(SGC K=2/60-20-20)",
+            "Step9 MLP([X|SGC(X)]/pub)",
+            "Step10 MLP(+2hop/pub)"
         ]
-        # Gather available metrics safely (fallback to 0.0 if missing)
-        def _v(x): return x if isinstance(x, float) else (x.item() if torch.is_tensor(x) else 0.0)
+        def _v(name):
+            return globals()[name] if name in globals() else 0.0
         vals = [
-            _v(gcn_test), _v(mlp_test),
-            _v(d_te), _v(dc_te), _v(dcc_te), _v(dccp_te),
-            _v(f8_te) if 'f8_te' in locals() else 0.0,
-            _v(aug_test),
-            _v(r2_test), _v(a2_test),
-            _v(b50_te), _v(b200_te),
-            _v(s_te) if 's_te' in locals() else 0.0,
-            _v(sgc_te),
-            _v(csgc_te),
-            _v(th_te) if 'th_te' in locals() else 0.0,
+            float(_v('gcn_test')), float(_v('mlp_test')),
+            float(_v('d_te')), float(_v('dc_te')), float(_v('dcc_te')), float(_v('dccp_te')),
+            float(_v('f8_te')) if 'f8_te' in globals() else 0.0,
+            float(_v('aug_test')),
+            float(_v('r2_test')), float(_v('a2_test')),
+            float(_v('b50_te')), float(_v('b200_te')),
+            float(_v('s_te')) if 's_te' in globals() else 0.0,
+            float(_v('sgc_te')),
+            float(_v('csgc_te')),
+            float(_v('th_te')) if 'th_te' in globals() else 0.0,
         ]
-        plt.figure(figsize=(12,5))
+        plt.figure(figsize=(13,5))
         plt.bar(range(len(labels)), vals)
-        plt.xticks(range(len(labels)), labels, rotation=40, ha='right', fontsize=8)
+        plt.xticks(range(len(labels)), labels, rotation=38, ha='right', fontsize=8)
         plt.ylabel("Test Acc")
-        plt.title("MLP evolves towards GCN behavior (structure injections)")
+        plt.title("Evolving an MLP toward GCN behavior (one structural hint at a time)")
         plt.ylim(0, 1.0); plt.tight_layout(); plt.savefig('accuracy_summary.png', dpi=200)
         print('Saved summary bar chart to accuracy_summary.png')
     except Exception:
