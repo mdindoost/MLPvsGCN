@@ -125,12 +125,11 @@ This injects the **smoothness prior** while keeping training **edge-free**. A pr
 
 | Model | Uses edges *during training*? | Extra features | Test Acc (Cora) |
 |------|-------------------------------|----------------|------------------|
-| MLP (raw) | No | – | ~0.55–0.60 |
-| MLP + graph feats (+8 LPE) | No | deg, clustering, core, PR (+LPE) | ~0.62–0.72 |
-| MLP + SGC-preprop (K=2) | No (edges offline) | smoothed X | ~0.80–0.87 |
-| GCN (2-layer) | Yes | – | ~0.80–0.83 |
+| MLP (raw) | No | – |  |
+| MLP + graph feats (+8 LPE) | No | deg, clustering, core, PR (+LPE) |  |
+| MLP + SGC-preprop (K=2) | No (edges offline) | smoothed X | |
+| GCN (2-layer) | Yes | – |  |
 
-The **ordering** is robust across seeds: **GCN ≥ SGC-preprop > MLP+feats > MLP**.
 
 ---
 
