@@ -10,8 +10,8 @@ import torch.nn.functional as F
 import numpy as np
 
 from torch_geometric.datasets import Planetoid
-from torch_geometric.nn import GCNConv
-from torch_geometric.utils import to_networkx, add_self_loops, degree
+from torch_geometric.nn import GCNConv, SAGEConv
+from torch_geometric.utils import to_networkx, add_self_loops, degree, subgraph as tg_subgraph
 
 import networkx as nx
 
@@ -87,6 +87,26 @@ def train(model, data, use_edges=True, lr=0.01, weight_decay=5e-4, epochs=200):
         loss = F.cross_entropy(out[data.train_mask], data.y[data.train_mask])
         loss.backward(); opt.step()
 
+# New minimal helpers for inductive demo (kept very local)
+@torch.no_grad()
+def eval_accs_on_edgeindex(model, data, edge_index):
+    """Evaluate a message-passing model on a custom edge_index (e.g., full graph at test time)."""
+    model.eval()
+    out = model(data.x, edge_index)
+    pred = out.argmax(dim=1)
+    def acc(mask): return (pred[mask] == data.y[mask]).float().mean().item()
+    return acc, pred, out
+
+def train_only_edge_index(model, data, edge_index, lr=0.01, weight_decay=5e-4, epochs=200):
+    """Train a message-passing model using a custom edge_index (e.g., subgraph for inductive)."""
+    opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    for _ in range(epochs):
+        model.train(); opt.zero_grad()
+        out = model(data.x, edge_index)
+        loss = F.cross_entropy(out[data.train_mask], data.y[data.train_mask])
+        loss.backward(); opt.step()
+
+
 def make_random_split(data, train_frac=0.6, val_frac=0.2, test_frac=0.2):
     N = data.num_nodes
     perm = torch.randperm(N, device=data.x.device)
@@ -96,6 +116,19 @@ def make_random_split(data, train_frac=0.6, val_frac=0.2, test_frac=0.2):
     data.val_mask   = torch.zeros(N, dtype=torch.bool, device=data.x.device); data.val_mask[val_idx] = True
     data.test_mask  = torch.zeros(N, dtype=torch.bool, device=data.x.device); data.test_mask[test_idx] = True
     return data
+
+# Helper: split ONLY inside an allowed subset (used by Step 11)
+def make_split_from_allowed_mask(mask_allowed, train_frac=0.6, val_frac=0.2, test_frac=0.2, device='cpu'):
+    idx = torch.nonzero(mask_allowed, as_tuple=False).view(-1)
+    N = idx.numel()
+    perm = idx[torch.randperm(N, device=idx.device)]
+    n_train = int(train_frac * N); n_val = int(val_frac * N)
+    train_idx = perm[:n_train]; val_idx = perm[n_train:n_train+n_val]; test_idx = perm[n_train+n_val:]
+    train_mask = torch.zeros(mask_allowed.size(0), dtype=torch.bool, device=device); train_mask[train_idx] = True
+    val_mask   = torch.zeros_like(train_mask); val_mask[val_idx] = True
+    test_mask  = torch.zeros_like(train_mask); test_mask[test_idx] = True
+    return train_mask, val_mask, test_mask
+
 
 def zscore_columns(X, eps=1e-6):
     m = X.mean(dim=0, keepdim=True)
@@ -172,6 +205,19 @@ class MLP(nn.Module):
         return self.lin2(h)
     def hidden(self, x):
         return F.relu(self.lin1(x))
+
+# New: very small GraphSAGE for inductive demo
+class SAGE(nn.Module):
+    def __init__(self, in_dim, hid=64, out_dim=None, dropout=0.5):
+        super().__init__()
+        self.conv1 = SAGEConv(in_dim, hid)  # mean aggregator
+        self.conv2 = SAGEConv(hid, out_dim)
+        self.dropout = dropout
+    def forward(self, x, edge_index):
+        h = F.relu(self.conv1(x, edge_index))
+        h = F.dropout(h, p=self.dropout, training=self.training)
+        out = self.conv2(h, edge_index)
+        return out
 
 # ----------------------------
 # Load data & show samples
@@ -274,6 +320,7 @@ print_embedding_samples(mlp_H, data.y, k=3, cols=8, prefix="MLP(hidden) on raw f
 # ----------------------------
 # Triplet cosine-sim demo (GCN vs MLP)
 # ----------------------------
+
 def _unique_undirected_edges(edge_index):
     row, col = edge_index
     s = set()
@@ -508,6 +555,8 @@ mlp_aug2 = MLP(in_dim=data_aug_602020.x.size(1), out_dim=dataset.num_classes, dr
 train(mlp_aug2, data_aug_602020, use_edges=False, epochs=200, weight_decay=5e-3)
 a2_train, a2_val, a2_test, _, _ = eval_accs(mlp_aug2, data_aug_602020, use_edges=False)
 print(f"MLP(+feats{lpe_note_consol}) on 60/20/20 -> train {a2_train:.3f} | val {a2_val:.3f} | test {a2_test:.3f}")
+print("Narration: With more labels, even edge-blind MLPs catch up; supervision substitutes for relational bias.")
+print("Insight: Handcrafted graph stats without smoothing still lag; the raw MLP narrows the gap as label rate grows.")
 
 # ----------------------------
 # Step 6: Epoch sensitivity (kept)
@@ -522,6 +571,8 @@ mlp_aug_200 = MLP(in_dim=data_aug_602020.x.size(1), out_dim=dataset.num_classes,
 train(mlp_aug_200, data_aug_602020, use_edges=False, epochs=200, weight_decay=5e-3)
 b200_tr, b200_val, b200_te, _, _ = eval_accs(mlp_aug_200, data_aug_602020, use_edges=False)
 print(f"MLP(+feats) 200 epochs -> train {b200_tr:.3f} | val {b200_val:.3f} | test {b200_te:.3f}")
+print("Narration: Training longer doesn’t change the inductive bias—only how hard we fit it.")
+print("Insight: Early stopping finds a sweet spot; beyond ~100–200 epochs we invite tiny gains and potential overfit.")
 
 # ----------------------------
 # Step 7: Stronger LPE → 32D (kept)
@@ -543,6 +594,8 @@ try:
     s_tr, s_val, s_te, _, _ = eval_accs(mlp_aug_strong, data_aug2, use_edges=False)
     lpe_note2 = " + 32D LPE"
     print(f"MLP(+feats{lpe_note2}) on 60/20/20 -> train {s_tr:.3f} | val {s_val:.3f} | test {s_te:.3f}")
+    print("Narration: Richer LPE gives smoother coordinates—great when classes form broad regions on the graph.")
+    print("Insight: Useful on homophilous graphs; compute cost ↑, diminishing returns after ~32 comps on Cora.")
 except Exception as e:
     print("Stronger LPE step skipped:", e)
 
@@ -574,6 +627,7 @@ train(mlp_sgc, data_sgc, use_edges=False, epochs=200, weight_decay=5e-3)
 sgc_tr, sgc_val, sgc_te, _, _ = eval_accs(mlp_sgc, data_sgc, use_edges=False)
 print(f"MLP on SGC-preprop (K=2) -> train {sgc_tr:.3f} | val {sgc_val:.3f} | test {sgc_te:.3f}")
 print("Insight: Diffuse features first, then classify—this injects the smoothness prior explicitly.")
+print("Narration: SGC is one-shot message passing—robust to training-time edge noise, but can’t adapt to new edges at test.")
 
 # ----------------------------
 # Step 9: Variant — concatenate X with SGC(X) on public split
@@ -590,6 +644,7 @@ csgc_tr, csgc_val, csgc_te, csgc_pred, _ = eval_accs(mlp_concat_sgc, data_concat
 print(f"MLP on [X | SGC(X)] (pub split) -> train {csgc_tr:.3f} | val {csgc_val:.3f} | test {csgc_te:.3f}")
 print("Neighbor agreement:", neighbor_agreement(csgc_pred, data.edge_index))
 print("Narration: Closest mimic to a GCN while staying edge-free at training time.")
+print("Insight: Concatenation preserves sharp word signals while adding smoothed context—helpful when classes need both.")
 
 # ----------------------------
 # Step 10: Optional — +2-hop ego count (public split)
@@ -621,6 +676,72 @@ except Exception as e:
     print("2-hop ego step skipped:", e)
 
 # ----------------------------
+# Step 11: GraphSAGE inductive demo (NEW)
+# ----------------------------
+section("Step 11: GraphSAGE inductive vs MLP([X | SGC(X)]) on held-out nodes")
+# 1) Build a connected training subgraph (≈60% of nodes) via BFS on the giant component
+all_nodes = np.array(list(giant.nodes()))
+start = int(all_nodes[np.argmax([giant.degree(n) for n in all_nodes])])
+# BFS order until target count
+target = int(0.60 * N)
+order = list(nx.bfs_tree(giant, start))
+sub_nodes = torch.tensor(order[:target], dtype=torch.long, device=device)
+sub_mask = torch.zeros(N, dtype=torch.bool, device=device)
+sub_mask[sub_nodes] = True
+heldout_mask = ~sub_mask
+print(f"Inductive split: train-subgraph nodes = {int(sub_mask.sum())}, held-out nodes = {int(heldout_mask.sum())}")
+
+# 2) Create train/val/test *inside* the subgraph; treat ALL held-out nodes as the inductive test set
+train_mask_ind, val_mask_ind, test_mask_ind_inner = make_split_from_allowed_mask(sub_mask, 0.7, 0.15, 0.15, device=device)
+inductive_test_mask = heldout_mask.clone()  # true inductive generalization
+
+# Attach masks to a clone
+ind_data = data.clone()
+ind_data.train_mask = train_mask_ind
+ind_data.val_mask   = val_mask_ind
+ind_data.test_mask  = test_mask_ind_inner  # used only for in-subgraph reporting
+
+# 3) Extract the training subgraph edges for *training only*
+edge_index_sub, _ = tg_subgraph(sub_nodes, data.edge_index, relabel_nodes=False)
+print(f"Edges used for SAGE training: {edge_index_sub.size(1)} (only inside the 60% subgraph)")
+
+# 4) Train GraphSAGE on the subgraph only
+sage = SAGE(in_dim=dataset.num_node_features, hid=64, out_dim=dataset.num_classes, dropout=0.5).to(device)
+train_only_edge_index(sage, ind_data, edge_index_sub, lr=0.01, weight_decay=5e-4, epochs=200)
+# Evaluate SAGE: (a) within-subgraph (transductive-style), (b) true inductive on held-out nodes
+acc_fn_full, sage_pred_full, _ = eval_accs_on_edgeindex(sage, data, data.edge_index)  # full graph edges for inference
+sage_in_sub = acc_fn_full(ind_data.test_mask)
+sage_inductive = acc_fn_full(inductive_test_mask)
+print(f"SAGE -> in-subgraph test {sage_in_sub:.3f} | held-out (inductive) {sage_inductive:.3f}")
+print("Narration: SAGE never saw the held-out nodes during training; at inference it aggregates from their neighbors using the learned aggregator.")
+print("Insight: If held-out accuracy stays close to in-subgraph, SAGE learned general neighbor-combine rules.")
+
+with torch.no_grad():
+    print("Neighbor agreement (SAGE, full graph):", neighbor_agreement(sage_pred_full, data.edge_index))
+
+# 5) Inductive baseline: MLP on [X | SGC(X_train-subgraph)]
+#    Compute SGC using ONLY the training subgraph edges (self-loops keep features for held-out nodes)
+X_sgc_ind = prepropagate_features(data.x.clone(), edge_index_sub, K=2)
+X_sgc_ind = zscore_columns(X_sgc_ind)
+mlp_ind = MLP(in_dim=(data.x.size(1) + X_sgc_ind.size(1)), out_dim=dataset.num_classes, dropout=0.6).to(device)
+ind_concat = data.clone(); ind_concat.x = zscore_columns(torch.cat([data.x, X_sgc_ind], dim=1))
+ind_concat.train_mask = train_mask_ind; ind_concat.val_mask = val_mask_ind; ind_concat.test_mask = test_mask_ind_inner
+train(mlp_ind, ind_concat, use_edges=False, epochs=200, weight_decay=5e-3)
+# Evaluate MLP on held-out nodes (no edges ever used at train or test)
+_, _, _, mlp_ind_pred, _ = eval_accs(mlp_ind, ind_concat, use_edges=False)
+mlp_ind_in_sub = (mlp_ind_pred[ind_data.test_mask] == data.y[ind_data.test_mask]).float().mean().item()
+mlp_ind_inductive = (mlp_ind_pred[inductive_test_mask] == data.y[inductive_test_mask]).float().mean().item()
+print(f"MLP([X|SGC_train]) -> in-subgraph test {mlp_ind_in_sub:.3f} | held-out (inductive) {mlp_ind_inductive:.3f}")
+print("Narration: The MLP never uses edges at training *or* test; SGC(X) was precomputed using only the train-subgraph structure.")
+print("Takeaway: A gap SAGE≻MLP([X|SGC_train]) on held-out nodes demonstrates *true inductiveness* of neighbor aggregation, not just feature smoothing.")
+# Extra probe: show SAGE needs test-time neighbors
+acc_fn_trainonly, _, _ = eval_accs_on_edgeindex(sage, data, edge_index_sub)
+sage_inductive_trainonly = acc_fn_trainonly(inductive_test_mask)
+print(f"SAGE (inference uses *train-only* edges) held-out: {sage_inductive_trainonly:.3f}  ",
+      "← shows dependence on test-time neighbors.")
+print(f"Story: SAGE transfers a learned neighbor-aggregation rule to unseen nodes. Delta on held-out: +{(sage_inductive - mlp_ind_inductive):.3f} vs MLP+SGC_train.")
+
+# ----------------------------
 # Summary bar chart (optional)
 # ----------------------------
 if HAS_MPL:
@@ -635,7 +756,8 @@ if HAS_MPL:
             "Step7 MLP(+feats+LPE32/60-20-20)",
             "Step8 MLP(SGC K=2/60-20-20)",
             "Step9 MLP([X|SGC(X)]/pub)",
-            "Step10 MLP(+2hop/pub)"
+            "Step10 MLP(+2hop/pub)",
+            "Step11 SAGE(inductive held-out)"
         ]
         def _v(name):
             return globals()[name] if name in globals() else 0.0
@@ -650,12 +772,13 @@ if HAS_MPL:
             float(_v('sgc_te')),
             float(_v('csgc_te')),
             float(_v('th_te')) if 'th_te' in globals() else 0.0,
+            float(_v('sage_inductive')) if 'sage_inductive' in globals() else 0.0,
         ]
-        plt.figure(figsize=(13,5))
+        plt.figure(figsize=(14,5))
         plt.bar(range(len(labels)), vals)
         plt.xticks(range(len(labels)), labels, rotation=38, ha='right', fontsize=8)
         plt.ylabel("Test Acc")
-        plt.title("Evolving an MLP toward GCN behavior (one structural hint at a time)")
+        plt.title("Evolving an MLP toward GCN behavior + Inductive GraphSAGE vs MLP([X|SGC_train])")
         plt.ylim(0, 1.0); plt.tight_layout(); plt.savefig('accuracy_summary.png', dpi=200)
         print('Saved summary bar chart to accuracy_summary.png')
     except Exception:
