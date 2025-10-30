@@ -1,3 +1,10 @@
+![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.2-red.svg)
+![PyG](https://img.shields.io/badge/PyTorch_Geometric-2.5-orange.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+![Status](https://img.shields.io/badge/status-Active-success.svg)
+![Made with ❤️](https://img.shields.io/badge/Made%20with-%F0%9F%96%A4%20and%20%F0%9F%A4%9E-blueviolet)
+
 # MLPvsGCN — A Lecture-Ready Demo on **Why Edges Matter**
 
 This repo is a compact, **reproducible** demo showing why a plain **MLP** underperforms a **GCN** on node classification (Cora), and how progressively injecting **graph-derived signals** (degree, clustering coefficient, k-core, PageRank, **Laplacian Positional Encodings**), and/or doing **SGC-style pre-propagation** makes an edge-free MLP behave more and more like a GCN.
