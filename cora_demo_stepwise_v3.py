@@ -222,7 +222,6 @@ class SAGE(nn.Module):
 # ----------------------------
 # Load data & show samples
 # ----------------------------
-print("(gnn_env) md724@ml:~/graph-demo$ python cora_demo_stepwise_v3.py")
 
 dataset = Planetoid(root='/tmp/Cora', name='Cora')
 data = dataset[0].to(device)
